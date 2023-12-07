@@ -2,6 +2,7 @@ import csv
 import gradio as gr
 import open_clip
 import os
+from datetime import datetime
 import torch
 import base64
 
@@ -18,7 +19,7 @@ from fastapi import FastAPI
 from fastapi.exceptions import HTTPException
 from io import BytesIO
 
-__version__ = "0.2.1"
+__version__ = "0.2.3"
 
 ci = None
 low_vram = False
@@ -26,7 +27,7 @@ low_vram = False
 BATCH_OUTPUT_MODES = [
     'Text file for each image',
     'Single text file with all prompts',
-    'csv file with columns for filenames and prompts',
+    'csv with  filenames prompts url size last-modified and rating? ',
 ]
 
 class BatchWriter:
@@ -39,9 +40,13 @@ class BatchWriter:
         elif mode == BATCH_OUTPUT_MODES[2]:
             self.file = open(os.path.join(folder, 'batch.csv'), 'w', encoding='utf-8', newline='')
             self.csv = csv.writer(self.file, quoting=csv.QUOTE_MINIMAL)
-            self.csv.writerow(['filename', 'prompt'])
+            self.csv.writerow(['filename','prompt', 'url', 'size', 'lastmod','rating'])
 
     def add(self, file, prompt):
+        url = self.folder + file
+        size = imagesize(url)
+        imgdate = datetime.fromtimestamp(os.path.getmtime(url)).isoformat() 
+
         if self.mode == BATCH_OUTPUT_MODES[0]:
             txt_file = os.path.splitext(file)[0] + ".txt"
             with open(os.path.join(self.folder, txt_file), 'w', encoding='utf-8') as f:
@@ -49,7 +54,7 @@ class BatchWriter:
         elif self.mode == BATCH_OUTPUT_MODES[1]:
             self.file.write(f"{prompt}\n")
         elif self.mode == BATCH_OUTPUT_MODES[2]:
-            self.csv.writerow([file, prompt])
+            self.csv.writerow([file, prompt, 'file:'+ url, size, imgdate])
 
     def close(self):
         if self.file is not None:
@@ -83,6 +88,16 @@ def unload():
         ci.caption_offloaded = True
         ci.clip_offloaded = True
         devices.torch_gc()
+
+def imagesize(url):
+    try:
+        imagesize = os.path.getsize(url)
+    except FileNotFoundError:
+        print("Image File not found.")
+    except OSError:
+        print("OS error occurred.")
+
+    return imagesize
 
 def image_analysis(image, clip_model_name):
     load(clip_model_name)
@@ -186,6 +201,8 @@ def analyze_tab():
 
 def batch_tab():
     def batch_process(folder, clip_model, mode, output_mode):
+        if not (folder.endswith('/')):
+            folder = folder +'/'
         if not os.path.exists(folder):
             print(f"Folder {folder} does not exist")
             return
